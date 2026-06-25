@@ -1,0 +1,10 @@
+^XA
+^CI28
+^PW800
+^LL600
+^FO40,40^A0N,42,42^FDWork Order: {{OrderNo}}^FS
+^FO40,100^A0N,42,42^FDPart: {{PartNo}}^FS
+^FO40,160^A0N,42,42^FDQty: {{Qty}}^FS
+^BY3,2,120
+^FO40,230^BCN,120,Y,N,N^FD{{Barcode}}^FS
+^XZ

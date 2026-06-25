@@ -1,0 +1,20 @@
+{
+  "printer": {
+    "host": "192.168.1.100",
+    "port": 9100,
+    "mode": "cups",
+    "cups_printer": ""
+  },
+  "auto_trigger": {
+    "enabled": false,
+    "protocol": "Tcp",
+    "tcp_port": 9000,
+    "serial_port": "/dev/ttyUSB0",
+    "baud_rate": 9600,
+    "trigger_keyword": "PRINT"
+  },
+  "data_dir": "data",
+  "template_dir": "templates",
+  "db_path": "data/print.db",
+  "default_dpi": 203
+}

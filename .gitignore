@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+.eggs/
+dist/
+build/
+data/print.db
+data/printed-images/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

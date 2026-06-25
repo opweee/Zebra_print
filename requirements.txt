@@ -1,0 +1,6 @@
+# ZebraTemplatePrinter Linux 版 依赖
+flask>=2.3
+pyserial>=3.5
+Pillow>=9.0
+python-barcode>=0.15
+qrcode>=7.4

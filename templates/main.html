@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>打码联动 Linux 版</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,system-ui,Segoe UI,Roboto,Arial,sans-serif;background:#f5f6fa;color:#2c3e50}
+.header{background:#2c3e50;color:#fff;padding:12px 24px;display:flex;align-items:center;justify-content:space-between}
+.header h1{font-size:20px;font-weight:600}
+.header .status{font-size:13px;opacity:.8}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px;max-width:1400px;margin:0 auto}
+.card{background:#fff;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.1);overflow:hidden}
+.card.full{grid-column:1/-1}
+.card h2{font-size:15px;font-weight:600;padding:12px 16px;border-bottom:1px solid #eee;background:#fafbfc;display:flex;align-items:center;gap:8px}
+.card-body{padding:16px}
+.form-group{margin-bottom:12px}
+.form-group label{display:block;font-size:13px;font-weight:500;margin-bottom:4px;color:#555}
+.form-group select,.form-group input{width:100%;padding:7px 10px;border:1px solid #d1d5db;border-radius:5px;font-size:13px;background:#fff}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.param-row{display:grid;grid-template-columns:1fr 2fr 32px;gap:8px;margin-bottom:8px;align-items:center}
+.param-row button{background:#e74c3c;color:#fff;border:none;border-radius:4px;width:28px;height:28px;cursor:pointer;font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center}
+.btn{padding:7px 16px;border:none;border-radius:5px;cursor:pointer;font-size:13px;font-weight:500;transition:all .15s}
+.btn-primary{background:#3498db;color:#fff}
+.btn-primary:hover{background:#2980b9}
+.btn-success{background:#27ae60;color:#fff}
+.btn-success:hover{background:#219a52}
+.btn-danger{background:#e74c3c;color:#fff}
+.btn-danger:hover{background:#c0392b}
+.btn-sm{padding:4px 10px;font-size:12px}
+.btn-group{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:8px 10px;text-align:left;border-bottom:1px solid #eee}
+th{background:#f8f9fa;font-weight:600;white-space:nowrap}
+.stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.stat-item{text-align:center;padding:12px;background:#f8f9fa;border-radius:6px}
+.stat-item .num{font-size:28px;font-weight:700;color:#2c3e50}
+.stat-item .label{font-size:12px;color:#888;margin-top:4px}
+.preview-img{max-width:100%;max-height:300px;border:1px solid #eee;border-radius:4px;display:none}
+.zpl-preview{background:#1e1e1e;color:#d4d4d4;font-family:Consolas,monospace;font-size:12px;padding:12px;border-radius:4px;overflow-x:auto;white-space:pre-wrap;max-height:300px;display:none}
+#triggerSection h2 .badge{font-size:11px;padding:2px 8px;border-radius:10px;font-weight:400}
+.badge-running{background:#d4edda;color:#155724}
+.badge-stopped{background:#f8d7da;color:#721c24}
+.notify{position:fixed;top:16px;right:16px;padding:12px 20px;border-radius:6px;color:#fff;font-size:14px;z-index:999;box-shadow:0 3px 12px rgba(0,0,0,.15);animation:slideIn .3s}
+.notify-success{background:#27ae60}
+.notify-error{background:#e74c3c}
+@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+.trigger-log{max-height:200px;overflow-y:auto;font-size:12px;background:#f8f9fa;border-radius:4px;padding:8px}
+.trigger-log .log-item{padding:4px 0;border-bottom:1px solid #eee}
+.trigger-log .log-item .time{color:#888;margin-right:8px}
+.trigger-log .log-item .src{font-weight:600;margin-right:4px}
+.filter-bar{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center}
+.filter-bar input,.filter-bar select{padding:5px 8px;border:1px solid #d1d5db;border-radius:4px;font-size:12px}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>&#x1F5A8; 打码联动 Linux 版</h1>
+  <span class="status">v1.0 | {{ printer_config.host }}:{{ printer_config.port }}</span>
+</div>
+
+<div class="grid">
+  <!-- 手动打印 -->
+  <div class="card" id="manualPrint">
+    <h2>&#x1F4DD; 手动打印</h2>
+    <div class="card-body">
+      <div class="form-group">
+        <label>型号</label>
+        <select id="modelSelect" onchange="onModelChange()">
+          <option value="">-- 选择型号 --</option>
+          {% for m in mappings %}
+          <option value="{{ m.model }}" data-template="{{ m.template_path }}" data-printer="{{ m.preferred_printer or '' }}" data-params="{{ m.parameters_json or '{}' }}">{{ m.model }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>模板文件</label>
+        <input type="text" id="templatePath" placeholder="templates/sample.zpl">
+      </div>
+      <div class="form-group">
+        <label>打印机</label>
+        <input type="text" id="printerName" value="{{ printer_config.host }}:{{ printer_config.port }}" readonly>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>份数</label>
+          <input type="number" id="copies" value="1" min="1" max="999">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>参数 <button class="btn btn-sm" onclick="addParam()" style="background:#eee;color:#333">+ 添加</button></label>
+        <div id="paramsContainer"></div>
+      </div>
+
+      <div class="btn-group">
+        <button class="btn btn-primary" onclick="doPrint()">&#x1F5A8; 打印</button>
+        <button class="btn btn-sm" onclick="doPreview()" style="background:#8e44ad;color:#fff">&#x1F441; 预览</button>
+        <button class="btn btn-sm" onclick="showHistory()" style="background:#eee">&#x1F4CA; 历史</button>
+      </div>
+
+      <div id="previewResult" style="margin-top:12px">
+        <img id="previewImg" class="preview-img" alt="预览">
+        <pre id="previewZpl" class="zpl-preview"></pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- 自动触发 -->
+  <div class="card" id="triggerSection">
+    <h2>
+      &#x26A1; 自动触发
+      <span class="badge badge-stopped" id="triggerStatus">已停止</span>
+    </h2>
+    <div class="card-body">
+      <div class="stat-grid">
+        <div class="stat-item"><div class="num" id="statTotal">0</div><div class="label">总数</div></div>
+        <div class="stat-item"><div class="num" id="statOk">0</div><div class="label">合格</div></div>
+        <div class="stat-item"><div class="num" id="statNg">0</div><div class="label">不合格</div></div>
+        <div class="stat-item"><div class="num" id="statRate">0%</div><div class="label">合格率</div></div>
+      </div>
+      <div class="btn-group" style="margin-top:12px">
+        <button class="btn btn-success" id="btnStartTrigger" onclick="toggleTrigger(true)">&#x25B6; 启动监听</button>
+        <button class="btn btn-danger" id="btnStopTrigger" onclick="toggleTrigger(false)" style="display:none">&#x23F9; 停止监听</button>
+        <button class="btn btn-sm" onclick="resetTriggerStats()" style="background:#eee">&#x1F9F9; 清零统计</button>
+      </div>
+      <div class="trigger-log" id="triggerLog" style="margin-top:12px"></div>
+    </div>
+  </div>
+
+  <!-- 型号设置 -->
+  <div class="card full" id="mappingSection">
+    <h2>&#x2699; 型号模板设置</h2>
+    <div class="card-body">
+      <div class="btn-group" style="margin-bottom:12px">
+        <button class="btn btn-sm btn-primary" onclick="addModel()">+ 新增型号</button>
+        <button class="btn btn-sm" onclick="saveAllMappings()" style="background:#27ae60;color:#fff">&#x1F4BE; 保存全部</button>
+        <button class="btn btn-sm" onclick="loadMappings()" style="background:#eee">&#x21BB; 重新加载</button>
+      </div>
+      <div class="table-wrap">
+        <table id="mappingTable">
+          <thead><tr><th>型号</th><th>模板路径</th><th>指定打印机</th><th>参数</th><th>操作</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- 打印历史 -->
+  <div class="card full" id="historySection" style="display:none">
+    <h2>&#x1F4CA; 打印历史</h2>
+    <div class="card-body">
+      <div class="filter-bar">
+        <input type="text" id="histKeyword" placeholder="关键字搜索" style="width:150px">
+        <select id="histMode"><option value="">全部模式</option><option>ZPL</option><option>Image</option><option>AutoTrigger</option></select>
+        <select id="histResult"><option value="">全部结果</option><option>Success</option><option>Fail</option></select>
+        <button class="btn btn-sm btn-primary" onclick="loadHistory()">搜索</button>
+        <button class="btn btn-sm" onclick="exportCsv()">导出CSV</button>
+        <button class="btn btn-sm" onclick="document.getElementById('historySection').style.display='none'" style="background:#eee">关闭</button>
+      </div>
+      <div class="table-wrap">
+        <table id="historyTable">
+          <thead><tr><th>时间</th><th>型号</th><th>模板</th><th>打印机</th><th>份数</th><th>模式</th><th>结果</th><th>错误</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="notifyContainer" style="position:fixed;top:16px;right:16px;z-index:999"></div>
+
+<script>
+let triggerLogItems = [];
+
+function $(id){return document.getElementById(id)}
+
+function notify(msg, type){
+  const div = document.createElement('div');
+  div.className = 'notify notify-' + type;
+  div.textContent = msg;
+  $('notifyContainer').appendChild(div);
+  setTimeout(()=>div.remove(), 3000);
+}
+
+// ── 参数管理 ──
+function addParam(key='', val=''){
+  const c = $('paramsContainer');
+  const div = document.createElement('div');
+  div.className = 'param-row';
+  div.innerHTML = '<input type="text" class="param-key" placeholder="参数名" value="'+key+'">' +
+    '<input type="text" class="param-val" placeholder="参数值 (支持 SEQ(1,1,4))" value="'+val+'">' +
+    '<button onclick="this.parentElement.remove()">x</button>';
+  c.appendChild(div);
+}
+
+function getParams(){
+  const rows = $$('param-key','param-val');
+  const p = {};
+  for(let i=0;i<rows[0].length;i++){
+    const k = rows[0][i].value.trim();
+    if(k) p[k] = rows[1][i].value.trim();
+  }
+  return p;
+}
+
+function $$(...names){
+  return names.map(n=>document.getElementsByClassName(n));
+}
+
+// ── 型号变化 ──
+function onModelChange(){
+  const sel = $('modelSelect');
+  const opt = sel.options[sel.selectedIndex];
+  if(!opt || !opt.dataset.template) return;
+  $('templatePath').value = opt.dataset.template;
+  $('paramsContainer').innerHTML = '';
+
+  let params = {};
+  try{params = JSON.parse(opt.dataset.params||'{}')}catch(e){}
+
+  for(const[k,v] of Object.entries(params)){
+    addParam(k, v);
+  }
+}
+
+// ── 打印 ──
+async function doPrint(){
+  const model = $('modelSelect').value;
+  const templatePath = $('templatePath').value.trim();
+  const copies = parseInt($('copies').value)||1;
+  const parameters = getParams();
+
+  if(!templatePath){notify('请选择模板文件','error');return}
+
+  const resp = await fetch('/api/print',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({model,template_path:templatePath,copies,parameters})
+  });
+  const data = await resp.json();
+  if(data.ok) notify('打印成功! '+data.success_count+'/'+copies, 'success');
+  else notify('打印失败: '+(data.errors||['未知错误']).join(', '), 'error');
+}
+
+// ── 预览 ──
+async function doPreview(){
+  const templatePath = $('templatePath').value.trim();
+  if(!templatePath){notify('请选择模板','error');return}
+
+  const resp = await fetch('/api/preview',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({template_path:templatePath,parameters:getParams()})
+  });
+  const data = await resp.json();
+  $('previewImg').style.display='none';
+  $('previewZpl').style.display='none';
+  if(data.type==='image'){
+    $('previewImg').src='data:image/png;base64,'+data.data;
+    $('previewImg').style.display='block';
+  }else if(data.type==='zpl'){
+    $('previewZpl').textContent=data.data;
+    $('previewZpl').style.display='block';
+  }
+}
+
+// ── 型号映射 ──
+async function loadMappings(){
+  const resp = await fetch('/api/mappings');
+  const data = await resp.json();
+  const tbody = document.querySelector('#mappingTable tbody');
+  tbody.innerHTML = data.map((m,i)=>'<tr>'+
+    '<td><input type="text" value="'+m.model+'" class="map-model"></td>'+
+    '<td><input type="text" value="'+m.template_path+'" class="map-template" style="width:200px"></td>'+
+    '<td><input type="text" value="'+(m.preferred_printer||'')+'" class="map-printer"></td>'+
+    '<td><input type="text" value="'+(m.parameters_json||'')+'" class="map-params" style="width:200px"></td>'+
+    '<td><button class="btn btn-sm btn-danger" onclick="this.closest(\'tr\').remove()">删除</button></td>'+
+  '</tr>').join('');
+}
+
+function addModel(){
+  const tbody = document.querySelector('#mappingTable tbody');
+  const tr = document.createElement('tr');
+  tr.innerHTML = '<td><input type="text" class="map-model" placeholder="新型号"></td>'+
+    '<td><input type="text" class="map-template" placeholder="模板路径" style="width:200px"></td>'+
+    '<td><input type="text" class="map-printer" placeholder="打印机"></td>'+
+    '<td><input type="text" class="map-params" placeholder=\'{"a":"SEQ(1,1,4)"}\' style="width:200px"></td>'+
+    '<td><button class="btn btn-sm btn-danger" onclick="this.closest(\'tr\').remove()">删除</button></td>';
+  tbody.appendChild(tr);
+}
+
+async function saveAllMappings(){
+  const rows = document.querySelectorAll('#mappingTable tbody tr');
+  const mappings = [];
+  for(const tr of rows){
+    const cells = tr.querySelectorAll('input');
+    const model = cells[0].value.trim();
+    const template = cells[1].value.trim();
+    if(!model || !template) continue;
+    mappings.push({
+      model,template_path:template,
+      preferred_printer:cells[2].value.trim()||null,
+      parameters_json:cells[3].value.trim()||null
+    });
+  }
+  await fetch('/api/mappings',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(mappings)
+  });
+  notify('保存成功','success');
+  location.reload();
+}
+
+// ── 打印历史 ──
+function showHistory(){
+  $('historySection').style.display='block';
+  loadHistory();
+  $('historySection').scrollIntoView({behavior:'smooth'});
+}
+
+async function loadHistory(){
+  const kw = $('histKeyword').value;
+  const mode = $('histMode').value;
+  const result = $('histResult').value;
+  const params = new URLSearchParams({keyword:kw,mode,result,limit:300});
+  const resp = await fetch('/api/history?'+params);
+  const data = await resp.json();
+  const tbody = document.querySelector('#historyTable tbody');
+  tbody.innerHTML = data.map(i=>'<tr>'+
+    '<td>'+i.printed_at+'</td><td>'+(i.model||'')+'</td><td>'+i.template_path+'</td>'+
+    '<td>'+i.printer_name+'</td><td>'+i.copies+'</td><td>'+i.mode+'</td>'+
+    '<td style="color:'+(i.result==='Success'?'green':'red')+'">'+i.result+'</td>'+
+    '<td style="color:red">'+(i.error_message||'')+'</td></tr>'
+  ).join('');
+}
+
+function exportCsv(){
+  window.open('/api/history/export','_blank');
+}
+
+// ── 自动触发 ──
+async function toggleTrigger(on){
+  $('btnStartTrigger').style.display = on?'none':'inline-block';
+  $('btnStopTrigger').style.display = on?'inline-block':'none';
+  $('triggerStatus').textContent = on?'运行中':'已停止';
+  $('triggerStatus').className = on?'badge badge-running':'badge badge-stopped';
+  await fetch('/api/auto-trigger',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({enabled:on})
+  });
+
+  if(on){
+    pollStats();
+    addTriggerLog('系统', '监听已启动');
+  }else{
+    addTriggerLog('系统', '监听已停止');
+  }
+}
+
+function addTriggerLog(src, msg){
+  const now = new Date().toLocaleTimeString();
+  triggerLogItems.unshift({time:now,src,msg});
+  if(triggerLogItems.length > 50) triggerLogItems.pop();
+  $('triggerLog').innerHTML = triggerLogItems.map(i=>
+    '<div class="log-item"><span class="time">'+i.time+'</span>'+
+    '<span class="src">['+i.src+']</span>'+i.msg+'</div>'
+  ).join('');
+}
+
+async function pollStats(){
+  const resp = await fetch('/api/trigger-stats');
+  const s = await resp.json();
+  $('statTotal').textContent = s.total;
+  $('statOk').textContent = s.ok;
+  $('statNg').textContent = s.ng;
+  $('statRate').textContent = (s.total>0?(s.ok/s.total*100).toFixed(1):0)+'%';
+  setTimeout(pollStats, 2000);
+}
+
+async function resetTriggerStats(){
+  await fetch('/api/trigger-stats/reset',{method:'POST'});
+  notify('统计已清零','success');
+}
+
+// ── 初始化 ──
+loadMappings();
+addParam();
+</script>
+</body>
+</html>
