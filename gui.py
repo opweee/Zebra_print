@@ -20,10 +20,10 @@ from PyQt5.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QComboBox, QTableWidget, QTableWidgetItem,
     QHeaderView, QSpinBox, QTextEdit, QGroupBox, QFormLayout, QMessageBox,
     QFileDialog, QStatusBar, QSplitter, QCheckBox, QGridLayout, QFrame, QDialog,
-    QDialogButtonBox
+    QDialogButtonBox, QStackedWidget
 )
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QThread
-from PyQt5.QtGui import QFont, QIcon, QColor
+from PyQt5.QtGui import QFont, QIcon, QColor, QPixmap
 
 # ── 后端模块 ──
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -37,10 +37,8 @@ from zebra_printer.printer import (
     print_zpl, cups_raw_print, get_cups_printers, cups_print_image
 )
 from zebra_printer.config import AppConfig
-from zebra_printer.label_renderer import render_label
+from zebra_printer.label_renderer import render_label, LabelElement
 from zebra_printer.trigger_service import AutoTriggerService, TriggerSettings, TriggerMessage
-from zebra_printer.statistics import StatisticsWidget
-from zebra_printer.label_designer_widget import LabelDesignerWidget
 from zebra_printer.statistics import StatisticsWidget
 from zebra_printer.label_designer_widget import LabelDesignerWidget
 
@@ -58,13 +56,15 @@ class PrintWorker(QThread):
     progress = pyqtSignal(int)              # current copy
 
     def __init__(self, template_path, params, copies,
-                 printer_name="", is_json=False):
+                 printer_name="", is_json=False, db=None, scope_key=""):
         super().__init__()
         self.template_path = template_path
         self.params = params
         self.copies = copies
         self.printer_name = printer_name
-        self.is_json = is_json       # True = JSON 标签模板, False = ZPL 模板
+        self.is_json = is_json
+        self.db = db
+        self.scope_key = scope_key       # True = JSON 标签模板, False = ZPL 模板
 
     def run(self):
         try:
@@ -113,8 +113,6 @@ class PrintWorker(QThread):
 
     def _print_json(self):
         tmpl_data = load_json_template(self.template_path)
-        from zebra_printer.label_renderer import LabelElement
-        elements = [LabelElement(e) for e in tmpl_data["elements"]]
         dpi = 203
         resolver = ParamResolver()
         seq_offsets = {}
@@ -126,11 +124,9 @@ class PrintWorker(QThread):
         for i in range(self.copies):
             self.progress.emit(i + 1)
             copy_params = per_copy_values[i] if i < len(per_copy_values) else self.params
-            img = render_label(
-                tmpl_data["width_mm"], tmpl_data["height_mm"],
-                elements, copy_params, dpi=dpi
-            )
-
+            elements = [LabelElement(e) for e in tmpl_data["elements"]]
+            img = render_label(tmpl_data["width_mm"], tmpl_data["height_mm"],
+                               elements, copy_params, dpi=dpi)
             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
                 img_path = f.name
             img.save(img_path, "PNG")
@@ -139,7 +135,6 @@ class PrintWorker(QThread):
                 ok, err = cups_print_image(img_path, self.printer_name)
             else:
                 ok, err = False, "未选择打印机"
-
             os.unlink(img_path)
 
             if ok:
@@ -193,7 +188,7 @@ class MainWindow(QMainWindow):
 
         # 标签设计
         self._designer = LabelDesignerWidget(BASE_DIR)
-        self._designer.template_saved.connect(self._refresh_templates)
+        self._designer.template_saved.connect(self._on_designer_saved)
         tabs.addTab(self._designer, "✏ 标签设计")
 
         tabs.addTab(self._build_history_tab(), "📜 历史记录")
@@ -211,6 +206,22 @@ class MainWindow(QMainWindow):
         self.statusBar().addWidget(self._lbl_counter)
 
     # ── Tab 1: 打印 ─────────────────────────────────────────────────────
+
+
+    def _on_designer_saved(self, fname):
+        """标签设计保存后：刷新模板列表 + 切换到打印页 + 选中保存的模板"""
+        self._refresh_templates()
+        # 切换到打印标签页
+        tabs = self.centralWidget().findChild(QTabWidget)
+        for i in range(tabs.count()):
+            if '打印' in tabs.tabText(i):
+                tabs.setCurrentIndex(i)
+                break
+        # 选中保存的模板
+        if fname:
+            ci = self._cmb_template.findText(fname)
+            if ci >= 0:
+                self._cmb_template.setCurrentIndex(ci)
 
     def _build_print_tab(self):
         w = QWidget()
@@ -256,11 +267,17 @@ class MainWindow(QMainWindow):
 
         gb_preview = QGroupBox("打印预览")
         preview_layout = QVBoxLayout(gb_preview)
+        self._preview_stack = QStackedWidget()
+        self._preview_stack.setMaximumHeight(240)
         self._txt_zpl_preview = QTextEdit()
         self._txt_zpl_preview.setReadOnly(True)
-        self._txt_zpl_preview.setMaximumHeight(180)
         self._txt_zpl_preview.setFont(QFont("Consolas", 10))
-        preview_layout.addWidget(self._txt_zpl_preview)
+        self._preview_stack.addWidget(self._txt_zpl_preview)
+        self._lbl_image_preview = QLabel()
+        self._lbl_image_preview.setAlignment(Qt.AlignCenter)
+        self._lbl_image_preview.setStyleSheet("background: white; border: 1px solid #ddd;")
+        self._preview_stack.addWidget(self._lbl_image_preview)
+        preview_layout.addWidget(self._preview_stack)
         layout.addWidget(gb_preview)
 
         btn_row = QHBoxLayout()
@@ -832,10 +849,22 @@ class MainWindow(QMainWindow):
             self._tbl_params.setItem(row, 0, QTableWidgetItem(ph))
             val = saved_params.get(ph, "")
             self._tbl_params.setItem(row, 1, QTableWidgetItem(val))
-            self._tbl_params.setItem(row, 2, QTableWidgetItem("FIXED"))
+            combo = QComboBox()
+            combo.addItems(["FIXED", "SEQ"])
+            combo.setCurrentText("FIXED")
+            combo.currentTextChanged.connect(
+                lambda text, r=row: self._on_rule_changed(r, text))
+            self._tbl_params.setCellWidget(row, 2, combo)
         self._tbl_params.blockSignals(False)
 
         self._do_preview()
+
+    def _on_rule_changed(self, row, rule):
+        """规则下拉切换时：SEQ 自动插入模板，FIXED 保持原值"""
+        if rule == "SEQ":
+            val_item = self._tbl_params.item(row, 1)
+            if val_item and not val_item.text():
+                val_item.setText("SEQ(, ,)")
 
     def _on_param_changed(self, item):
         model = self._txt_model.text().strip()
@@ -846,6 +875,10 @@ class MainWindow(QMainWindow):
             key = self._tbl_params.item(r, 0).text() if self._tbl_params.item(r, 0) else ""
             val = self._tbl_params.item(r, 1).text() if self._tbl_params.item(r, 1) else ""
             if key:
+                # 如果规则是 SEQ 但值里没有 SEQ，自动补上
+                rule = self._get_rule(r)
+                if rule == "SEQ" and "SEQ(" not in val:
+                    val = "SEQ(" + val + ",1,4)"
                 params[key] = val
         tmpl = self._cmb_template.currentText()
         self.db.upsert_mapping(model, tmpl, parameters_json=json.dumps(params, ensure_ascii=False))
@@ -858,6 +891,14 @@ class MainWindow(QMainWindow):
             if key:
                 params[key] = val
         return params
+
+    def _get_rule(self, row):
+        """获取指定行的规则（FIXED/SEQ），支持 QComboBox"""
+        widget = self._tbl_params.cellWidget(row, 2)
+        if widget and isinstance(widget, QComboBox):
+            return widget.currentText()
+        item = self._tbl_params.item(row, 2)
+        return item.text() if item else "FIXED"
 
     # ═══════════════════════════════════════════════════════════════════════
     # 预览 & 打印
@@ -873,19 +914,15 @@ class MainWindow(QMainWindow):
         try:
             if is_json_template(tmpl_path):
                 tmpl_data = load_json_template(tmpl_path)
-                elements = tmpl_data.get("elements", [])
-                summary = f"[JSON 标签模板] {tmpl}\n"
-                summary += f"尺寸: {tmpl_data['width_mm']}mm × {tmpl_data['height_mm']}mm\n"
-                summary += f"元素数: {len(elements)}\n"
-                summary += "-" * 40 + "\n"
-                for i, e in enumerate(elements):
-                    etype = e.get("Type", "?")
-                    content = e.get("Content", "")
-                    for k, v in params.items():
-                        content = content.replace("{{%s}}" % k, str(v))
-                    name = e.get("Name", f"#{i}")
-                    summary += f"  [{etype}] {name}: {content}\n"
-                self._txt_zpl_preview.setPlainText(summary)
+                elements = [LabelElement(e) for e in tmpl_data["elements"]]
+                img = render_label(tmpl_data["width_mm"], tmpl_data["height_mm"],
+                                   elements, params, dpi=203)
+                tmp = "/tmp/_preview_output.png"
+                img.save(tmp, "PNG")
+                pix = QPixmap(tmp)
+                scaled = pix.scaled(480, 220, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                self._lbl_image_preview.setPixmap(scaled)
+                self._preview_stack.setCurrentIndex(1)
             else:
                 template = load_template(tmpl_path)
                 zpl = render_zpl(template, params)
@@ -926,7 +963,9 @@ class MainWindow(QMainWindow):
         self._btn_print.setText("打印中...")
         self._worker = PrintWorker(tmpl_path, params, copies,
                                    printer_name=printer_name,
-                                   is_json=is_json)
+                                   is_json=is_json,
+                                   db=self.db,
+                                   scope_key=self._txt_model.text().strip() or tmpl)
         self._worker.finished.connect(self._on_print_done)
         self._worker.start()
 
@@ -1044,12 +1083,9 @@ class MainWindow(QMainWindow):
         try:
             if is_json_template(tmpl_path):
                 tmpl_data = load_json_template(tmpl_path)
-                from zebra_printer.label_renderer import LabelElement
                 elements = [LabelElement(e) for e in tmpl_data["elements"]]
-                img = render_label(
-                    tmpl_data["width_mm"], tmpl_data["height_mm"],
-                    elements, params, dpi=203
-                )
+                img = render_label(tmpl_data["width_mm"], tmpl_data["height_mm"],
+                                   elements, params, dpi=203)
                 with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
                     img_path = f.name
                 img.save(img_path, "PNG")
